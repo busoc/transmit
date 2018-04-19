@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"hash/adler32"
 	"io"
-	// "log"
 	"net"
 	"os"
 	"sort"
@@ -269,7 +268,7 @@ func runMerge2(cmd *cli.Command, args []string) error {
 	defer r.Close()
 
 	c := struct {
-		Addr string `toml:"address"`
+		Addr     string    `toml:"address"`
 		Mappings []mapping `toml:"channel"`
 	}{}
 	if err := toml.NewDecoder(r).Decode(&c); err != nil {

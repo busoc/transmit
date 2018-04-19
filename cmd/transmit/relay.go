@@ -7,10 +7,10 @@ import (
 	"os"
 	"sync"
 
+	"github.com/busoc/transmit"
 	"github.com/juju/ratelimit"
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
-	"github.com/midbel/transmit"
 )
 
 type bandwidth struct {

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"text/template"
 
+	"github.com/busoc/transmit"
 	"github.com/midbel/cli"
-	"github.com/midbel/transmit"
 )
 
 const helpText = `{{.Name}} contains various actions to monitor system activities.

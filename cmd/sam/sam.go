@@ -3,19 +3,19 @@ package main
 import (
 	"bytes"
 	"flag"
-	"log"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
-	"time"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/midbel/cli"
 	"golang.org/x/sync/errgroup"
 )
 
-type clock struct {}
+type clock struct{}
 
 func (_ clock) Now() time.Time {
 	var t syscall.Timeval
@@ -30,7 +30,7 @@ func (_ clock) Sleep(t time.Duration) {
 }
 
 type writer struct {
-	inner io.Writer
+	inner  io.Writer
 	bucket *Bucket
 }
 
@@ -51,7 +51,7 @@ type Bucket struct {
 
 	wait chan struct{}
 
-	mu sync.Mutex
+	mu        sync.Mutex
 	available int64
 }
 
@@ -65,7 +65,7 @@ func (b *Bucket) Take(n int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for {
-		if d := b.available-n; b.available > 0 && d >= n {
+		if d := b.available - n; b.available > 0 && d >= n {
 			b.available = d
 			break
 		}
@@ -74,7 +74,7 @@ func (b *Bucket) Take(n int64) {
 }
 
 func (b *Bucket) refill(e time.Duration) {
-	c := float64(b.capacity*int64(e/time.Millisecond))/1000
+	c := float64(b.capacity*int64(e/time.Millisecond)) / 1000
 	c *= 1.01
 
 	ns := e.Nanoseconds()
@@ -169,7 +169,7 @@ func runClientWithRate(a string, z, b, p int, e time.Duration, buck *Bucket) err
 		buf := bytes.NewBuffer(bs)
 		for buf.Len() > 0 {
 			curr++
-			j := int(curr)%p
+			j := int(curr) % p
 			g.Go(transmit(buf.Next(b), ws[j]))
 		}
 		if err := g.Wait(); err != nil {
@@ -215,7 +215,7 @@ func runServer(a string, z int) error {
 
 			defer func() {
 				d := time.Since(w)
-				t := total/(1024*1024)
+				t := total / (1024 * 1024)
 				log.Printf("done with %s: %.2fMB (%.2fMBs)", c.RemoteAddr(), t, t/d.Seconds())
 			}()
 			for {
@@ -224,7 +224,7 @@ func runServer(a string, z int) error {
 				if err, ok := err.(net.Error); ok && err.Timeout() {
 					total += float64(c)
 					offset := time.Since(w)
-					t := total/(1024*1024)
+					t := total / (1024 * 1024)
 					log.Printf("%.2f | %.2f | %.2f | %s", float64(c)/(1024*1024), t, t/offset.Seconds(), offset)
 				} else {
 					return
@@ -234,7 +234,7 @@ func runServer(a string, z int) error {
 	}
 }
 
-func transmit (bs []byte, c io.Writer) func() error {
+func transmit(bs []byte, c io.Writer) func() error {
 	return func() error {
 		_, err := c.Write(bs)
 		return err

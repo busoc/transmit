@@ -3,7 +3,7 @@ GOCMD=go
 GOBUILD=$(GOCMD) build
 GOGET=$(GOCMD) get
 
-BASE=src/github.com/midbel/transmit
+BASE=src/github.com/busoc/transmit
 SOURCE=$(BASE)/cmd/transmit/*go
 BINARY=transmit
 VERSION=
@@ -22,7 +22,7 @@ DEPSLIST = \
 	github.com/midbel/rustine \
 	github.com/midbel/rustine/rw \
 	github.com/midbel/toml \
-	github.com/midbel/transmit \
+	github.com/busoc/transmit \
 
 deps:
 	for i in $(DEPSLIST); do \

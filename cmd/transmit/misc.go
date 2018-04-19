@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/busoc/transmit"
 	"github.com/juju/ratelimit"
 	"github.com/midbel/cli"
 	"github.com/midbel/rustine"
 	"github.com/midbel/rustine/rw"
-	"github.com/midbel/transmit"
 	"golang.org/x/sync/errgroup"
 )
 

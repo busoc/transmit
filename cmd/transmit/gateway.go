@@ -6,9 +6,9 @@ import (
 	"net"
 	"os"
 
+	"github.com/busoc/transmit"
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
-	"github.com/midbel/transmit"
 )
 
 type route struct {

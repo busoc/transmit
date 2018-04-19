@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/busoc/transmit"
 	"github.com/juju/ratelimit"
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
-	"github.com/midbel/transmit"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -242,7 +242,7 @@ func (c channel) Options(buf cli.Size, syst bool) *SplitOptions {
 		Syst: syst,
 	}
 	return &SplitOptions{
-		Proto:  "tcp",
+		Proto:   "tcp",
 		Limiter: i,
 		Length:  buf,
 		Block:   c.Block,
