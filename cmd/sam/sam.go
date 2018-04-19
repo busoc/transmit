@@ -32,6 +32,7 @@ func (_ clock) Sleep(t time.Duration) {
 func main() {
 	var rate cli.Size
 	flag.Var(&rate, "r", "rate")
+	global := flag.Bool("g", false, "use the same bucket for all connections")
 	parallel := flag.Int("p", 4, "parallel")
 	count := flag.Int("n", 4, "count")
 	size := flag.Int("s", 1024, "size")
@@ -52,18 +53,18 @@ func main() {
 		if *count <= 0 {
 			*count = 1
 		}
-		// var b *Bucket
-		// if r := rate.Int(); r > 0 {
-		// 	b = NewBucket(r*int64(*count), *every)
-		// }
+		var b *transmit.Bucket
+		if r := rate.Int(); r > 0 && *global {
+			b = transmit.NewBucket(r, *every)
+		}
 		var g errgroup.Group
 		for i := 0; i < *count; i++ {
 			g.Go(func() error {
-				var b *transmit.Bucket
-				if r := rate.Int(); r > 0 {
-					b = transmit.NewBucket(r, *every)
+				var buck = b
+				if r := rate.Int(); r > 0 && !*global {
+					buck = transmit.NewBucket(r, *every)
 				}
-				return runClientWithRate(flag.Arg(0), *size, *buffer, *parallel, *wait, b)
+				return runClientWithRate(flag.Arg(0), *size, *buffer, *parallel, *wait, buck)
 			})
 		}
 		err = g.Wait()
