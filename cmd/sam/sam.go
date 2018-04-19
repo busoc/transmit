@@ -157,7 +157,7 @@ func runServer(a string, z int) error {
 					total += float64(c)
 					offset := time.Since(w)
 					t := total / (1024 * 1024)
-					log.Printf("%.2f | %.2f | %.2f | %s", float64(c)/(1024*1024), t, t/offset.Seconds(), offset)
+					log.Printf("%.2fMB | %.2fMB | %.2fMB/s | %s", float64(c)/(1024*1024), t, t/offset.Seconds(), offset)
 				} else {
 					return
 				}
