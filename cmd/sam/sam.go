@@ -7,27 +7,12 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"syscall"
 	"time"
 
 	"github.com/busoc/transmit"
 	"github.com/midbel/cli"
 	"golang.org/x/sync/errgroup"
 )
-
-type clock struct{}
-
-func (_ clock) Now() time.Time {
-	var t syscall.Timeval
-	syscall.Gettimeofday(&t)
-	s, n := t.Unix()
-	return time.Unix(s, n)
-}
-
-func (_ clock) Sleep(t time.Duration) {
-	s := syscall.NsecToTimespec(t.Nanoseconds())
-	syscall.Nanosleep(&s, nil)
-}
 
 func main() {
 	var rate cli.Size
@@ -114,7 +99,7 @@ func runClientWithRate(a string, z, b, p int, e time.Duration, buck *transmit.Bu
 }
 
 func runTest(c int, e time.Duration) error {
-	k := clock{}
+	k := transmit.SystemClock()
 	a := k.Now()
 	for i := 0; c <= 0 || i < c; i++ {
 		k.Sleep(e)
