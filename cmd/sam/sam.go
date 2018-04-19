@@ -7,10 +7,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"sync"
 	"syscall"
 	"time"
 
+	"github.com/busoc/transmit"
 	"github.com/midbel/cli"
 	"golang.org/x/sync/errgroup"
 )
@@ -27,74 +27,6 @@ func (_ clock) Now() time.Time {
 func (_ clock) Sleep(t time.Duration) {
 	s := syscall.NsecToTimespec(t.Nanoseconds())
 	syscall.Nanosleep(&s, nil)
-}
-
-type writer struct {
-	inner  io.Writer
-	bucket *Bucket
-}
-
-func Writer(w io.Writer, b *Bucket) io.Writer {
-	if b == nil {
-		return w
-	}
-	return &writer{w, b}
-}
-
-func (w *writer) Write(bs []byte) (int, error) {
-	w.bucket.Take(int64(len(bs)))
-	return w.inner.Write(bs)
-}
-
-type Bucket struct {
-	capacity int64
-
-	wait chan struct{}
-
-	mu        sync.Mutex
-	available int64
-}
-
-func NewBucket(n int64, e time.Duration) *Bucket {
-	b := &Bucket{capacity: n, available: n, wait: make(chan struct{})}
-	go b.refill(e)
-	return b
-}
-
-func (b *Bucket) Take(n int64) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for {
-		if d := b.available - n; b.available > 0 && d >= n {
-			b.available = d
-			break
-		}
-		<-b.wait
-	}
-}
-
-func (b *Bucket) refill(e time.Duration) {
-	c := float64(b.capacity*int64(e/time.Millisecond)) / 1000
-	c *= 1.01
-
-	ns := e.Nanoseconds()
-	sleep := func() {
-		i := syscall.NsecToTimespec(ns)
-		syscall.Nanosleep(&i, nil)
-	}
-
-	for {
-		// time.Sleep(e)
-		sleep()
-		if b.available > b.capacity {
-			continue
-		}
-		b.available = b.available + int64(c)
-		select {
-		case b.wait <- struct{}{}:
-		default:
-		}
-	}
 }
 
 func main() {
@@ -127,9 +59,9 @@ func main() {
 		var g errgroup.Group
 		for i := 0; i < *count; i++ {
 			g.Go(func() error {
-				var b *Bucket
+				var b *transmit.Bucket
 				if r := rate.Int(); r > 0 {
-					b = NewBucket(r, *every)
+					b = transmit.NewBucket(r, *every)
 				}
 				return runClientWithRate(flag.Arg(0), *size, *buffer, *parallel, *wait, b)
 			})
@@ -141,7 +73,7 @@ func main() {
 	}
 }
 
-func runClientWithRate(a string, z, b, p int, e time.Duration, buck *Bucket) error {
+func runClientWithRate(a string, z, b, p int, e time.Duration, buck *transmit.Bucket) error {
 	defer log.Println("done client")
 	cs := make([]net.Conn, p)
 	ws := make([]io.Writer, p)
@@ -156,7 +88,7 @@ func runClientWithRate(a string, z, b, p int, e time.Duration, buck *Bucket) err
 		as = append(as, c.LocalAddr().String())
 		cs[i], ws[i] = c, c
 		if buck != nil {
-			ws[i] = Writer(c, buck)
+			ws[i] = transmit.Writer(c, buck)
 		}
 	}
 	log.Printf("start client (%v)", as)
@@ -170,7 +102,7 @@ func runClientWithRate(a string, z, b, p int, e time.Duration, buck *Bucket) err
 		for buf.Len() > 0 {
 			curr++
 			j := int(curr) % p
-			g.Go(transmit(buf.Next(b), ws[j]))
+			g.Go(copyBuffer(buf.Next(b), ws[j]))
 		}
 		if err := g.Wait(); err != nil {
 			log.Println("exiting client", err)
@@ -234,7 +166,7 @@ func runServer(a string, z int) error {
 	}
 }
 
-func transmit(bs []byte, c io.Writer) func() error {
+func copyBuffer(bs []byte, c io.Writer) func() error {
 	return func() error {
 		_, err := c.Write(bs)
 		return err
