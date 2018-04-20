@@ -130,26 +130,6 @@ func (i Limiter) Bucket(c int) *transmit.Bucket {
 	return transmit.NewBucket(r, i.Every)
 }
 
-func (i Limiter) Writer(w io.Writer, c int) io.Writer {
-	if i.Rate == 0 {
-		return w
-	}
-	r := i.Rate
-	if !i.Keep {
-		r = i.Rate.Divide(c)
-	}
-	b := transmit.NewBucket(r.Int(), i.Every)
-	return transmit.Writer(w, b)
-	// var k transmit.Clock
-	// if i.Syst {
-	// 	k = transmit.SystemClock()
-	// } else {
-	// 	k = transmit.RealClock()
-	// }
-	// b := ratelimit.NewBucketWithRateAndClock(r.Float(), r.Int(), k)
-	// return ratelimit.Writer(w, b)
-}
-
 type SplitOptions struct {
 	Limiter
 	Length cli.Size
