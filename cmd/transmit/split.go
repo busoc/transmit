@@ -201,13 +201,21 @@ func (s *splitter) Split(b *Block) error {
 		// if _, err := io.Copy(s.nextWriter(), w); err != nil {
 		// 	return err
 		// }
-		c := s.nextWriter()
-		g.Go(func() error {
-			_, err := io.Copy(c, w)
-			return err
-		})
+		g.Go(copyBuffer(w.Bytes(), s.nextWriter()))
+		// c := s.nextWriter()
+		// g.Go(func() error {
+		// 	_, err := io.Copy(c, w)
+		// 	return err
+		// })
 	}
 	return g.Wait()
+}
+
+func copyBuffer(bs []byte, c io.Writer) func() error {
+	return func() error {
+		_, err := c.Write(bs)
+		return err
+	}
 }
 
 func (s *splitter) nextWriter() io.Writer {
