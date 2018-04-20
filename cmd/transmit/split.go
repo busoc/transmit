@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/busoc/transmit"
-	"github.com/juju/ratelimit"
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
 	"golang.org/x/sync/errgroup"
@@ -116,6 +115,19 @@ type Limiter struct {
 	Rate cli.Size
 	Keep bool
 	Syst bool
+	Every time.Duration
+}
+
+func (i Limiter) Bucket(c int) *transmit.Bucket {
+	r := i.Rate.Int()
+	if r == 0 {
+		return nil
+	}
+	if i.Keep {
+		n := i.Rate.Multiply(c)
+		r = n.Int()
+	}
+	return transmit.NewBucket(r, i.Every)
 }
 
 func (i Limiter) Writer(w io.Writer, c int) io.Writer {
@@ -126,14 +138,16 @@ func (i Limiter) Writer(w io.Writer, c int) io.Writer {
 	if !i.Keep {
 		r = i.Rate.Divide(c)
 	}
-	var k transmit.Clock
-	if i.Syst {
-		k = transmit.SystemClock()
-	} else {
-		k = transmit.RealClock()
-	}
-	b := ratelimit.NewBucketWithRateAndClock(r.Float(), r.Int(), k)
-	return ratelimit.Writer(w, b)
+	b := transmit.NewBucket(r.Int(), i.Every)
+	return transmit.Writer(w, b)
+	// var k transmit.Clock
+	// if i.Syst {
+	// 	k = transmit.SystemClock()
+	// } else {
+	// 	k = transmit.RealClock()
+	// }
+	// b := ratelimit.NewBucketWithRateAndClock(r.Float(), r.Int(), k)
+	// return ratelimit.Writer(w, b)
 }
 
 type SplitOptions struct {
@@ -163,12 +177,16 @@ func Split(a string, n, s int, k Limiter) (*splitter, error) {
 		writers: make([]io.Writer, n),
 		block:   uint16(s),
 	}
+	buck := k.Bucket(n)
 	for i := 0; i < n; i++ {
 		c, err := net.Dial("tcp", a)
 		if err != nil {
 			return nil, err
 		}
-		wc.conns[i], wc.writers[i] = c, k.Writer(c, n)
+		wc.conns[i], wc.writers[i] = c, c
+		if buck != nil {
+			wc.writers[i] = transmit.Writer(c, buck)
+		}
 	}
 	return &wc, nil
 }
@@ -297,10 +315,12 @@ func runSplit(cmd *cli.Command, args []string) error {
 	s.Rate, _ = cli.ParseSize("8m")
 	s.Length, _ = cli.ParseSize("32K")
 	s.Block, _ = cli.ParseSize("1K")
+	s.Every = time.Millisecond*8
 
 	cmd.Flag.Var(&s.Rate, "r", "rate")
 	cmd.Flag.Var(&s.Length, "s", "size")
 	cmd.Flag.Var(&s.Block, "b", "block")
+	cmd.Flag.DurationVar(&s.Every, "e", s.Every, "every")
 	cmd.Flag.IntVar(&s.Count, "n", 4, "count")
 	cmd.Flag.BoolVar(&s.Keep, "k", false, "keep")
 	cmd.Flag.BoolVar(&s.Syst, "y", false, "system")
