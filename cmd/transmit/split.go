@@ -197,16 +197,7 @@ func (s *splitter) Split(b *Block) error {
 		binary.Write(w, binary.BigEndian, adler32.Checksum(vs[:n]))
 		binary.Write(w, binary.BigEndian, roll.Sum32())
 
-		// TODO: speed up fragment writing by running each write in its own goroutine
-		// if _, err := io.Copy(s.nextWriter(), w); err != nil {
-		// 	return err
-		// }
 		g.Go(copyBuffer(w.Bytes(), s.nextWriter()))
-		// c := s.nextWriter()
-		// g.Go(func() error {
-		// 	_, err := io.Copy(c, w)
-		// 	return err
-		// })
 	}
 	return g.Wait()
 }
