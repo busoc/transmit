@@ -118,13 +118,14 @@ type Limiter struct {
 	Syst bool
 }
 
-func (i Limiter) Writer(w io.Writer, c int) io.Writer {
-	if i.Rate == 0 {
-		return w
+func (i Limiter) Bucket(n int) *ratelimit.Bucket {
+	r := i.Rate.Float()
+	if r == 0 {
+		return nil
 	}
-	r := i.Rate
-	if !i.Keep {
-		r = i.Rate.Divide(c)
+	if i.Keep {
+		n := i.Rate.Multiply(n)
+		r = n.Float()
 	}
 	var k transmit.Clock
 	if i.Syst {
@@ -132,8 +133,7 @@ func (i Limiter) Writer(w io.Writer, c int) io.Writer {
 	} else {
 		k = transmit.RealClock()
 	}
-	b := ratelimit.NewBucketWithRateAndClock(r.Float(), r.Int(), k)
-	return ratelimit.Writer(w, b)
+	return ratelimit.NewBucketWithRateAndClock(r, int64(r), k)
 }
 
 type SplitOptions struct {
@@ -163,12 +163,16 @@ func Split(a string, n, s int, k Limiter) (*splitter, error) {
 		writers: make([]io.Writer, n),
 		block:   uint16(s),
 	}
+	buck := k.Bucket(n)
 	for i := 0; i < n; i++ {
 		c, err := net.Dial("tcp", a)
 		if err != nil {
 			return nil, err
 		}
-		wc.conns[i], wc.writers[i] = c, k.Writer(c, n)
+		wc.conns[i], wc.writers[i] = c, c
+		if buck != nil {
+			wc.writers[i] = ratelimit.Writer(c, buck)
+		}
 	}
 	return &wc, nil
 }
