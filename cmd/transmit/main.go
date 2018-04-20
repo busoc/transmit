@@ -76,6 +76,12 @@ options:
 		Short: "merge and send fragmented packets",
 	},
 	{
+		Run:   runDuplicate,
+		Usage: "duplicate [-g] [-e] [-r] <local> <remote,...>",
+		Alias: []string{"samplicate"},
+		Short: "duplicate packets received from local to remote",
+	},
+	{
 		Run:   runSplit,
 		Usage: "split [-b] [-n] [-k] [-r] [-s] [-y] <remote> <local,...>",
 		Alias: []string{"disassemble"},
