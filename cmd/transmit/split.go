@@ -112,9 +112,9 @@ func (q BlockQueue) Swap(i, j int) {
 }
 
 type Limiter struct {
-	Rate cli.Size
-	Keep bool
-	Syst bool
+	Rate  cli.Size
+	Keep  bool
+	Syst  bool
 	Every time.Duration
 }
 
@@ -303,7 +303,7 @@ func runSplit(cmd *cli.Command, args []string) error {
 	s.Rate, _ = cli.ParseSize("8m")
 	s.Length, _ = cli.ParseSize("32K")
 	s.Block, _ = cli.ParseSize("1K")
-	s.Every = time.Millisecond*8
+	s.Every = time.Millisecond * 8
 
 	cmd.Flag.Var(&s.Rate, "r", "rate")
 	cmd.Flag.Var(&s.Length, "s", "size")

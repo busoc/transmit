@@ -10,7 +10,7 @@ type sysClock struct {
 }
 
 func (s *sysClock) Now() time.Time {
-	return now()
+	return Now()
 }
 
 func (s *sysClock) Sleep(d time.Duration) {

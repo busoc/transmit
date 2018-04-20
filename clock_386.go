@@ -10,7 +10,7 @@ type sysClock struct {
 }
 
 func (s *sysClock) Now() time.Time {
-	return now()
+	return Now()
 }
 
 func (s *sysClock) Sleep(d time.Duration) {
@@ -39,14 +39,7 @@ func (s *sysClock) Sleep(d time.Duration) {
 }
 
 func guessThreshold() time.Duration {
-	t := syscall.Timespec{
-		Sec:  0,
-		Nsec: int32(time.Millisecond.Nanoseconds()),
-	}
-	b := now()
-	if err := syscall.Nanosleep(&t, nil); err != nil {
-		return time.Millisecond
-	}
-	a := now()
-	return a.Sub(b).Truncate(time.Millisecond)
+	// e := sleepAtLeast(time.Millisecond.Nanoseconds())
+	// return e.Truncate(time.Millisecond)
+	return time.Millisecond
 }

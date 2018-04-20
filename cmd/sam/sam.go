@@ -6,9 +6,9 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"time"
-	"math/rand"
 
 	"github.com/busoc/transmit"
 	"github.com/midbel/cli"
