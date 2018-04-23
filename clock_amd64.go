@@ -42,10 +42,10 @@ func guessThreshold() time.Duration {
 		Sec:  0,
 		Nsec: time.Millisecond.Nanoseconds(),
 	}
-	b := now()
+	b := Now()
 	if err := syscall.Nanosleep(&t, nil); err != nil {
 		return time.Millisecond
 	}
-	a := now()
+	a := Now()
 	return a.Sub(b).Truncate(time.Millisecond)
 }
