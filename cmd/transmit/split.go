@@ -165,11 +165,7 @@ func Split(a string, n, s int, k Limiter) (*splitter, error) {
 		}
 		wc.conns[i], wc.writers[i] = c, c
 		if buck != nil {
-<<<<<<< HEAD
-			wc.writers[i] = ratelimit.Writer(c, buck)
-=======
 			wc.writers[i] = transmit.Writer(c, buck)
->>>>>>> leaky
 		}
 	}
 	return &wc, nil
