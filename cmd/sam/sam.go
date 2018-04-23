@@ -82,13 +82,13 @@ func runClientWithRate(a string, z, b, p int, e time.Duration, buck *transmit.Bu
 	var curr uint16
 
 	bs := make([]byte, z)
+	var g errgroup.Group
 	for {
 		z := rand.Intn(len(bs))
 		if z == 0 {
 			continue
 		}
 		time.Sleep(e)
-		var g errgroup.Group
 		buf := bytes.NewBuffer(bs[:z])
 		for buf.Len() > 0 {
 			curr++
@@ -96,7 +96,6 @@ func runClientWithRate(a string, z, b, p int, e time.Duration, buck *transmit.Bu
 			g.Go(copyBuffer(buf.Next(b), ws[j]))
 		}
 		if err := g.Wait(); err != nil {
-			log.Println("exiting client", err)
 			return err
 		}
 	}
@@ -141,14 +140,15 @@ func runServer(a string, z int) error {
 				t := total / (1024 * 1024)
 				log.Printf("done with %s: %.2fMB (%.2fMBs)", c.RemoteAddr(), t, t/d.Seconds())
 			}()
+			a := r.RemoteAddr()
 			for {
 				r.SetReadDeadline(time.Now().Add(time.Second))
 				c, err := io.CopyBuffer(ioutil.Discard, r, bs)
 				if err, ok := err.(net.Error); ok && err.Timeout() {
 					total += float64(c)
 					offset := time.Since(w)
-					t := total / (1024 * 1024)
-					log.Printf("%.2fMB | %.2fMB | %.2fMB/s | %s", float64(c)/(1024*1024), t, t/offset.Seconds(), offset)
+					t := total / 1024
+					log.Printf("%16s | %12.2fKB | %12.2fKB | %12.2fKBs | %s", a, float64(c)/1024, t, t/offset.Seconds(), offset)
 				} else {
 					return
 				}

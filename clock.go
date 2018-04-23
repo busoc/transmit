@@ -2,7 +2,6 @@ package transmit
 
 import (
 	"io"
-	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -26,46 +25,55 @@ func (w *writer) Write(bs []byte) (int, error) {
 }
 
 type Bucket struct {
-	capacity int64
-
-	mu        sync.Mutex
-	interval  time.Duration
-	available int64
+	available chan int64
+	done      chan struct{}
 }
 
 func NewBucket(n int64, e time.Duration) *Bucket {
 	b := &Bucket{
-		capacity:  n,
-		available: n,
-		interval:  e,
+		available: make(chan int64),
+		done:      make(chan struct{}),
 	}
+	go b.refill(n, e)
 	return b
 }
 
 func (b *Bucket) Take(n int64) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for {
-		d := b.available - n
-		if d > 0 {
-			b.available = d
-			break
-		}
-		b.wait()
-	}
+	b.available <- n
+	<-b.done
 }
 
-func (b *Bucket) wait() {
-	ns := sleepAtLeast(b.interval.Nanoseconds())
-	if b.available > b.capacity {
-		return
-	}
-	c := float64(b.capacity*int64(ns/time.Millisecond)) / 1000
-	d := b.available + int64(c*1.1)
-	if d > b.capacity {
-		b.available = b.capacity
-	} else {
-		b.available = d
+func (b *Bucket) refill(limit int64, every time.Duration) {
+	queue := make(chan int64)
+	go func() {
+		for {
+			ns := sleepAtLeast(every.Nanoseconds())
+			queue <- (limit * int64(ns/time.Millisecond)) / 1000
+		}
+	}()
+	available, empty := limit, struct{}{}
+	for {
+		select {
+		case n := <-queue:
+			if d := available + n; d > limit {
+				available = limit
+			} else {
+				available = d
+			}
+		case n := <-b.available:
+			d := available - n
+			if d >= 0 {
+				available = d
+			} else {
+				c := <-queue
+				if d := available - n + c; d > limit {
+					available = limit
+				} else {
+					available = d
+				}
+			}
+			b.done <- empty
+		}
 	}
 }
 
