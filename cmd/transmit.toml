@@ -43,16 +43,16 @@ filename = "copyright"
 
 [[resource]]
 source      = "src/github.com/busoc/transmit/examples/gateway.toml"
-destination = "usr/share/doc/transmit/examples"
+destination = "usr/share/doc/transmit/examples/"
 
 [[resource]]
 source      = "src/github.com/busoc/transmit/examples/relay.toml"
-destination = "usr/share/doc/transmit/examples"
+destination = "usr/share/doc/transmit/examples/"
 
 [[resource]]
 source      = "src/github.com/busoc/transmit/examples/split.toml"
-destination = "usr/share/doc/transmit/examples"
+destination = "usr/share/doc/transmit/examples/"
 
 [[resource]]
 source      = "src/github.com/busoc/transmit/examples/merge.toml"
-destination = "usr/share/doc/transmit/examples"
+destination = "usr/share/doc/transmit/examples/"
