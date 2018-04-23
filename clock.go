@@ -3,8 +3,9 @@ package transmit
 import (
 	"io"
 	"sync"
-	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 type writer struct {
@@ -27,15 +28,17 @@ func (w *writer) Write(bs []byte) (int, error) {
 type Bucket struct {
 	capacity int64
 
-	wait chan struct{}
-
 	mu        sync.Mutex
+	interval  time.Duration
 	available int64
 }
 
 func NewBucket(n int64, e time.Duration) *Bucket {
-	b := &Bucket{capacity: n, available: n, wait: make(chan struct{})}
-	go b.refill(e)
+	b := &Bucket{
+		capacity:  n,
+		available: n,
+		interval:  e,
+	}
 	return b
 }
 
@@ -43,35 +46,26 @@ func (b *Bucket) Take(n int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for {
-		if d := b.available - n; b.available > 0 && d >= n {
+		d := b.available - n
+		if d > 0 {
 			b.available = d
 			break
 		}
-		<-b.wait
+		b.wait()
 	}
 }
 
-func (b *Bucket) refill(e time.Duration) {
-	c := float64(b.capacity*int64(e/time.Millisecond)) / 1000
-	c *= 1.01
-
-	ns := e.Nanoseconds()
-	sleep := func() {
-		i := syscall.NsecToTimespec(ns)
-		syscall.Nanosleep(&i, nil)
+func (b *Bucket) wait() {
+	ns := sleepAtLeast(b.interval.Nanoseconds())
+	if b.available > b.capacity {
+		return
 	}
-
-	for {
-		// time.Sleep(e)
-		sleep()
-		if b.available > b.capacity {
-			continue
-		}
-		b.available = b.available + int64(c)
-		select {
-		case b.wait <- struct{}{}:
-		default:
-		}
+	c := float64(b.capacity*ns) / 1000
+	d := b.available + int64(c*1.1)
+	if d > b.capacity {
+		b.available = b.capacity
+	} else {
+		b.available = d
 	}
 }
 
@@ -98,10 +92,27 @@ func (r realClock) Sleep(d time.Duration) {
 	time.Sleep(d)
 }
 
-func now() time.Time {
-	var t syscall.Timeval
-	if err := syscall.Gettimeofday(&t); err != nil {
+func Now() time.Time {
+	t := now()
+	if t == nil {
 		return time.Now()
 	}
-	return time.Unix(int64(t.Sec), int64(t.Usec*1000))
+	return time.Unix(int64(t.Sec), int64(t.Nsec))
+}
+
+func now() *unix.Timespec {
+	var t unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_REALTIME, &t); err != nil {
+		return nil
+	}
+	return &t
+}
+
+func sleepAtLeast(ns int64) int64 {
+	b := now()
+	i := unix.NsecToTimespec(ns)
+	unix.Nanosleep(&i, nil)
+	a := now()
+
+	return (a.Nano() - b.Nano()) / 1e6
 }

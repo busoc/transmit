@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"time"
 
@@ -82,9 +83,13 @@ func runClientWithRate(a string, z, b, p int, e time.Duration, buck *transmit.Bu
 
 	bs := make([]byte, z)
 	for {
+		z := rand.Intn(len(bs))
+		if z == 0 {
+			continue
+		}
 		time.Sleep(e)
 		var g errgroup.Group
-		buf := bytes.NewBuffer(bs)
+		buf := bytes.NewBuffer(bs[:z])
 		for buf.Len() > 0 {
 			curr++
 			j := int(curr) % p

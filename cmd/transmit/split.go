@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/busoc/transmit"
-	"github.com/juju/ratelimit"
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
 	"golang.org/x/sync/errgroup"
@@ -113,27 +112,22 @@ func (q BlockQueue) Swap(i, j int) {
 }
 
 type Limiter struct {
-	Rate cli.Size
-	Keep bool
-	Syst bool
+	Rate  cli.Size
+	Keep  bool
+	Syst  bool
+	Every time.Duration
 }
 
-func (i Limiter) Bucket(n int) *ratelimit.Bucket {
-	r := i.Rate.Float()
+func (i Limiter) Bucket(c int) *transmit.Bucket {
+	r := i.Rate.Int()
 	if r == 0 {
 		return nil
 	}
 	if i.Keep {
-		n := i.Rate.Multiply(n)
-		r = n.Float()
+		n := i.Rate.Multiply(c)
+		r = n.Int()
 	}
-	var k transmit.Clock
-	if i.Syst {
-		k = transmit.SystemClock()
-	} else {
-		k = transmit.RealClock()
-	}
-	return ratelimit.NewBucketWithRateAndClock(r, int64(r), k)
+	return transmit.NewBucket(r, i.Every)
 }
 
 type SplitOptions struct {
@@ -171,7 +165,11 @@ func Split(a string, n, s int, k Limiter) (*splitter, error) {
 		}
 		wc.conns[i], wc.writers[i] = c, c
 		if buck != nil {
+<<<<<<< HEAD
 			wc.writers[i] = ratelimit.Writer(c, buck)
+=======
+			wc.writers[i] = transmit.Writer(c, buck)
+>>>>>>> leaky
 		}
 	}
 	return &wc, nil
@@ -203,17 +201,16 @@ func (s *splitter) Split(b *Block) error {
 		binary.Write(w, binary.BigEndian, adler32.Checksum(vs[:n]))
 		binary.Write(w, binary.BigEndian, roll.Sum32())
 
-		// TODO: speed up fragment writing by running each write in its own goroutine
-		// if _, err := io.Copy(s.nextWriter(), w); err != nil {
-		// 	return err
-		// }
-		c := s.nextWriter()
-		g.Go(func() error {
-			_, err := io.Copy(c, w)
-			return err
-		})
+		g.Go(copyBuffer(w.Bytes(), s.nextWriter()))
 	}
 	return g.Wait()
+}
+
+func copyBuffer(bs []byte, c io.Writer) func() error {
+	return func() error {
+		_, err := c.Write(bs)
+		return err
+	}
 }
 
 func (s *splitter) nextWriter() io.Writer {
@@ -301,10 +298,12 @@ func runSplit(cmd *cli.Command, args []string) error {
 	s.Rate, _ = cli.ParseSize("8m")
 	s.Length, _ = cli.ParseSize("32K")
 	s.Block, _ = cli.ParseSize("1K")
+	s.Every = time.Millisecond * 8
 
 	cmd.Flag.Var(&s.Rate, "r", "rate")
 	cmd.Flag.Var(&s.Length, "s", "size")
 	cmd.Flag.Var(&s.Block, "b", "block")
+	cmd.Flag.DurationVar(&s.Every, "e", s.Every, "every")
 	cmd.Flag.IntVar(&s.Count, "n", 4, "count")
 	cmd.Flag.BoolVar(&s.Keep, "k", false, "keep")
 	cmd.Flag.BoolVar(&s.Syst, "y", false, "system")

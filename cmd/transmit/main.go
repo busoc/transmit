@@ -87,7 +87,6 @@ options:
   -k keep   use same rate for all outgoing connections(s) (default: false)
   -r rate   specify bandwidth by requested connections (default: 8m)
   -s size   buffer to read from incoming connections (default: 32K)
-  -y        use system clock (default: false)
 
 notes on UNIT:
 b, k, kb, m, mb, g, gb   bits, kilobits, megabits and gigabits (the b is not required for k, m and g)
