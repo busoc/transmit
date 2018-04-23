@@ -1,0 +1,58 @@
+location = "var/deb/transmit-0.3.2.deb"
+
+[control]
+package      = "transmit"
+version      = "0.3.2"
+license      = "agpl"
+section      = "utils"
+priority     = "optional"
+arch         = "amd64"
+vendor       = "busoc"
+homepage     = "https://github.com/busoc/transmit"
+depends      = ["libc6"]
+summary      = "enhance packets transmission from one network to another."
+
+maintainer   = {
+  name  = "Nicolas Brun",
+  email = "nicolas.brun@busoc.be",
+}
+compiler = "go-1.10"
+
+[[resource]]
+source      = "bin/transmit-0.3.2-sam"
+destination = "usr/bin/"
+filename    = "transmit"
+mode = 0755
+
+[[resource]]
+source = "src/github.com/busoc/transmit/LICENSE"
+destination = "usr/share/doc/transmit/"
+filename = "copyright"
+
+# [[resource]]
+# source      = "src/github.com/busoc/transmit/files/CHANGELOG"
+# destination = "usr/share/doc/transmit/"
+# filename    = "changelog.Debian.gz"
+# compress    = true
+
+# [[resource]]
+# source      = "src/github.com/midbel/transmit/files/mack.1"
+# destination = "usr/share/man/man1"
+# compress    = true
+# filename    = "transmit.1.gz"
+
+[[resource]]
+source      = "src/github.com/busoc/transmit/examples/gateway.toml"
+destination = "usr/share/doc/transmit/examples"
+
+[[resource]]
+source      = "src/github.com/busoc/transmit/examples/relay.toml"
+destination = "usr/share/doc/transmit/examples"
+
+[[resource]]
+source      = "src/github.com/busoc/transmit/examples/split.toml"
+destination = "usr/share/doc/transmit/examples"
+
+[[resource]]
+source      = "src/github.com/busoc/transmit/examples/merge.toml"
+destination = "usr/share/doc/transmit/examples"
