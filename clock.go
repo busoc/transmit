@@ -60,7 +60,7 @@ func (b *Bucket) wait() {
 	if b.available > b.capacity {
 		return
 	}
-	c := float64(b.capacity*ns) / 1000
+	c := float64(b.capacity*int64(ns/time.Millisecond)) / 1000
 	d := b.available + int64(c*1.1)
 	if d > b.capacity {
 		b.available = b.capacity
@@ -108,11 +108,11 @@ func now() *unix.Timespec {
 	return &t
 }
 
-func sleepAtLeast(ns int64) int64 {
+func sleepAtLeast(ns int64) time.Duration {
 	b := now()
 	i := unix.NsecToTimespec(ns)
 	unix.Nanosleep(&i, nil)
 	a := now()
 
-	return (a.Nano() - b.Nano()) / 1e6
+	return time.Duration(a.Nano() - b.Nano())
 }
