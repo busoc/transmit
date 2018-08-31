@@ -19,11 +19,9 @@ type Counter interface {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Printf("%s [-p] [-v] [-sleep-tx] [-sleep-rx] <src> <dst,...>", path.Base(os.Args[0]))
+		fmt.Printf("%s [-p] [-v] <src> <dst,...>", path.Base(os.Args[0]))
 		os.Exit(2)
 	}
-	rxsleep := flag.Duration("sleep-rx", 0, "sleep recv side")
-	txsleep := flag.Duration("sleep-tx", 0, "sleep send side")
 	proto := flag.String("p", "udp", "protocol")
 	verbose := flag.Bool("v", false, "verbose")
 	flag.Parse()
@@ -36,7 +34,7 @@ func main() {
 		log.Fatalf("fail to listen to %s: %s", flag.Arg(0), err)
 	}
 	if *verbose {
-		r = Log(r, *rxsleep)
+		r = Log(r)
 	}
 	defer r.Close()
 
@@ -51,7 +49,7 @@ func main() {
 			log.Fatalf("fail to connect to %s (%s): %s", flag.Arg(i), *proto, err)
 		}
 		if *verbose {
-			c = Log(c, *txsleep)
+			c = Log(c)
 		}
 		defer c.Close()
 		ws = append(ws, c)
@@ -84,10 +82,8 @@ func duplicate(r io.Reader, ws ...io.Writer) error {
 type conn struct {
 	net.Conn
 
-	count, size, errcount uint64
-
-	sleep  time.Duration
 	logger *log.Logger
+	count, size, errcount uint64
 }
 
 func (c *conn) Stats() (uint64, uint64, uint64) {
@@ -95,9 +91,6 @@ func (c *conn) Stats() (uint64, uint64, uint64) {
 }
 
 func (c *conn) Read(bs []byte) (int, error) {
-	if c.sleep > 0 {
-		time.Sleep(c.sleep)
-	}
 	n, err := c.Conn.Read(bs)
 	msg := "ok"
 	if err != nil {
@@ -112,9 +105,6 @@ func (c *conn) Read(bs []byte) (int, error) {
 }
 
 func (c *conn) Write(bs []byte) (int, error) {
-	if c.sleep > 0 {
-		time.Sleep(c.sleep)
-	}
 	n, err := c.Conn.Write(bs)
 	msg := "ok"
 	if err != nil {
@@ -142,11 +132,11 @@ func Listen(a string) (net.Conn, error) {
 	return conn, err
 }
 
-func Log(c net.Conn, s time.Duration) net.Conn {
+func Log(c net.Conn) net.Conn {
 	addr := c.RemoteAddr()
 	if addr == nil {
 		addr = c.LocalAddr()
 	}
 	logger := log.New(os.Stdout, fmt.Sprintf("[%s] ", addr), log.LstdFlags)
-	return &conn{Conn: c, logger: logger, sleep: s}
+	return &conn{Conn: c, logger: logger}
 }
