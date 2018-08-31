@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"hash/adler32"
@@ -63,18 +62,6 @@ func main() {
 }
 
 func duplicate(r io.Reader, ws ...io.Writer) error {
-	var bg bytes.Buffer
-	r = io.TeeReader(r, &bg)
-	go func() {
-		for {
-			time.Sleep(time.Second)
-
-			n := bg.Len()
-			log.Printf("%.2f Mb/s", float64(n>>20)/time.Second.Seconds())
-			bg.Reset()
-		}
-	}()
-
 	now := time.Now()
 	n, err := io.Copy(io.MultiWriter(ws...), r)
 	if err != nil {
