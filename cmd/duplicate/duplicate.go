@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"hash/adler32"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
 	"time"
 )
 
@@ -19,24 +20,16 @@ type Counter interface {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Printf("%s [-p] [-v] <src> <dst,...>", path.Base(os.Args[0]))
+		fmt.Printf("%s [-p] [-v] <src> <dst,...>", filepath.Base(os.Args[0]))
 		os.Exit(2)
 	}
 	proto := flag.String("p", "udp", "protocol")
 	verbose := flag.Bool("v", false, "verbose")
+	debug := flag.Bool("g", false, "debug")
 	flag.Parse()
 	if flag.NArg() <= 1 {
 		flag.Usage()
 	}
-
-	r, err := Listen(flag.Arg(0))
-	if err != nil {
-		log.Fatalf("fail to listen to %s: %s", flag.Arg(0), err)
-	}
-	if *verbose {
-		r = Log(r)
-	}
-	defer r.Close()
 
 	var ws []io.Writer
 	for i := 1; i < flag.NArg(); i++ {
@@ -52,14 +45,47 @@ func main() {
 			c = Log(c)
 		}
 		defer c.Close()
-		ws = append(ws, c)
+		if *debug {
+			ws = append(ws, DebugW(c))
+		} else {
+			ws = append(ws, c)
+		}
 	}
-	if err := duplicate(r, ws...); err != nil {
+	c, err := Listen(flag.Arg(0))
+	if err != nil {
+		log.Fatalf("fail to listen to %s: %s", flag.Arg(0), err)
+	}
+	if *verbose {
+		c = Log(c)
+	}
+	defer c.Close()
+
+	var r io.Reader = c
+	if *debug {
+		r = DebugR(r)
+	}
+	if err := duplicate(r, ws); err != nil {
 		log.Fatalln(err)
 	}
 }
 
-func duplicate(r io.Reader, ws ...io.Writer) error {
+func DebugW(w io.Writer) io.Writer {
+	g, err := ioutil.TempFile("", "duplicate-w.raw-")
+	if err != nil {
+		return w
+	}
+	return io.MultiWriter(w, g)
+}
+
+func DebugR(r io.Reader) io.Reader {
+	g, err := ioutil.TempFile("", "duplicate-r.raw-")
+	if err != nil {
+		return r
+	}
+	return io.TeeReader(r, g)
+}
+
+func duplicate(r io.Reader, ws []io.Writer) error {
 	now := time.Now()
 	n, err := io.Copy(io.MultiWriter(ws...), r)
 	if err != nil {
@@ -79,18 +105,18 @@ func duplicate(r io.Reader, ws ...io.Writer) error {
 	return nil
 }
 
-type conn struct {
+type statConn struct {
 	net.Conn
 
-	logger *log.Logger
+	logger                *log.Logger
 	count, size, errcount uint64
 }
 
-func (c *conn) Stats() (uint64, uint64, uint64) {
+func (c *statConn) Stats() (uint64, uint64, uint64) {
 	return c.count, c.size, c.errcount
 }
 
-func (c *conn) Read(bs []byte) (int, error) {
+func (c *statConn) Read(bs []byte) (int, error) {
 	n, err := c.Conn.Read(bs)
 	msg := "ok"
 	if err != nil {
@@ -104,7 +130,7 @@ func (c *conn) Read(bs []byte) (int, error) {
 	return n, err
 }
 
-func (c *conn) Write(bs []byte) (int, error) {
+func (c *statConn) Write(bs []byte) (int, error) {
 	n, err := c.Conn.Write(bs)
 	msg := "ok"
 	if err != nil {
@@ -138,5 +164,27 @@ func Log(c net.Conn) net.Conn {
 		addr = c.LocalAddr()
 	}
 	logger := log.New(os.Stdout, fmt.Sprintf("[%s] ", addr), log.LstdFlags)
-	return &conn{Conn: c, logger: logger}
+	return &statConn{Conn: c, logger: logger}
+}
+
+type sleepConn struct {
+	net.Conn
+	sleep time.Duration
+}
+
+func Sleep(c net.Conn, s time.Duration) net.Conn {
+	if s <= 0 {
+		return c
+	}
+	return &sleepConn{Conn: c, sleep: s}
+}
+
+func (c *sleepConn) Read(bs []byte) (int, error) {
+	time.Sleep(c.sleep)
+	return c.Conn.Read(bs)
+}
+
+func (c *sleepConn) Write(bs []byte) (int, error) {
+	time.Sleep(c.sleep)
+	return c.Conn.Write(bs)
 }
