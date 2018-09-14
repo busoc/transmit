@@ -23,9 +23,9 @@ func main() {
 		fmt.Printf("%s [-p] [-v] <src> <dst,...>", filepath.Base(os.Args[0]))
 		os.Exit(2)
 	}
+	ifi := flag.String("i", "", "interface")
 	proto := flag.String("p", "udp", "protocol")
 	verbose := flag.Bool("v", false, "verbose")
-	debug := flag.Bool("g", false, "debug")
 	flag.Parse()
 	if flag.NArg() <= 1 {
 		flag.Usage()
@@ -45,13 +45,9 @@ func main() {
 			c = Log(c)
 		}
 		defer c.Close()
-		if *debug {
-			ws = append(ws, DebugW(c))
-		} else {
-			ws = append(ws, c)
-		}
+		ws = append(ws, c)
 	}
-	c, err := Listen(flag.Arg(0))
+	c, err := Listen(flag.Arg(0), *ifi)
 	if err != nil {
 		log.Fatalf("fail to listen to %s: %s", flag.Arg(0), err)
 	}
@@ -60,29 +56,9 @@ func main() {
 	}
 	defer c.Close()
 
-	var r io.Reader = c
-	if *debug {
-		r = DebugR(r)
-	}
-	if err := duplicate(r, ws); err != nil {
+	if err := duplicate(c, ws); err != nil {
 		log.Fatalln(err)
 	}
-}
-
-func DebugW(w io.Writer) io.Writer {
-	g, err := ioutil.TempFile("", "duplicate-w.raw-")
-	if err != nil {
-		return w
-	}
-	return io.MultiWriter(w, g)
-}
-
-func DebugR(r io.Reader) io.Reader {
-	g, err := ioutil.TempFile("", "duplicate-r.raw-")
-	if err != nil {
-		return r
-	}
-	return io.TeeReader(r, g)
 }
 
 func duplicate(r io.Reader, ws []io.Writer) error {
@@ -144,14 +120,18 @@ func (c *statConn) Write(bs []byte) (int, error) {
 	return n, err
 }
 
-func Listen(a string) (net.Conn, error) {
+func Listen(a, ifi string) (net.Conn, error) {
 	addr, err := net.ResolveUDPAddr("udp", a)
 	if err != nil {
 		return nil, err
 	}
 	var conn *net.UDPConn
 	if addr.IP.IsMulticast() {
-		conn, err = net.ListenMulticastUDP("udp", nil, addr)
+		var i *net.Interface
+		if ifi, err := net.InterfaceByName(ifi); err == nil {
+			i = ifi
+		}
+		conn, err = net.ListenMulticastUDP("udp", i, addr)
 	} else {
 		conn, err = net.ListenUDP("udp", addr)
 	}
