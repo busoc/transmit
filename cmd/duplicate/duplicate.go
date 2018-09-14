@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"hash/adler32"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/url"
