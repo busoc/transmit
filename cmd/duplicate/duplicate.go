@@ -9,40 +9,76 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+
+	"github.com/midbel/toml"
 )
 
 func main() {
 	flag.Usage = func() {
-		fmt.Printf("%s [-p] [-i] <src> <dst,...>", filepath.Base(os.Args[0]))
+		fmt.Printf("%s [-c] [-p] [-i] <src> <dst,...>", filepath.Base(os.Args[0]))
 		os.Exit(2)
 	}
-	ifi := flag.String("i", "", "interface")
-	proto := flag.String("p", "udp", "protocol")
+	settings := struct {
+		Config  bool     `toml:"-"`
+		Proto   string   `toml:"protocol"`
+		Nic     string   `toml:"nic"`
+		Local   string   `toml:"local"`
+		Remotes []string `toml:"remote"`
+	}{}
+	flag.BoolVar(&settings.Config, "c", false, "use configuration file")
+	flag.StringVar(&settings.Nic, "i", "", "interface")
+	flag.StringVar(&settings.Proto, "p", "udp", "protocol")
 	flag.Parse()
-	if flag.NArg() <= 1 {
-		flag.Usage()
+
+	if settings.Config {
+		r, err := os.Open(flag.Arg(0))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		defer r.Close()
+		if err := toml.NewDecoder(r).Decode(&settings); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+	} else {
+		if flag.NArg() <= 1 {
+			flag.Usage()
+		}
+		settings.Local = flag.Arg(0)
+		settings.Remotes = flag.Args()
 	}
 
 	var ws []io.Writer
-	for i := 1; i < flag.NArg(); i++ {
-		scheme, addr := *proto, flag.Arg(i)
-		if u, err := url.Parse(flag.Arg(i)); err == nil {
+	for i := 1; i < len(settings.Remotes); i++ {
+		scheme, addr := settings.Proto, settings.Remotes[i]
+		if u, err := url.Parse(addr); err == nil {
 			scheme, addr = u.Scheme, u.Host
 		}
 		c, err := net.Dial(scheme, addr)
 		if err != nil {
-			log.Fatalf("fail to connect to %s (%s): %s", flag.Arg(i), *proto, err)
+			log.Fatalf("fail to connect to %s (%s): %s", addr, scheme, err)
 		}
 		defer c.Close()
 		ws = append(ws, c)
 	}
-	c, err := Listen(flag.Arg(0), *ifi)
+	c, err := Listen(settings.Local, settings.Nic)
 	if err != nil {
-		log.Fatalf("fail to listen to %s: %s", flag.Arg(0), err)
+		log.Fatalf("fail to listen to %s: %s", settings.Local, err)
 	}
 	defer c.Close()
 
-	_, err = io.Copy(io.MultiWriter(ws...), c)
+	var w io.Writer
+	switch len(ws) {
+	case 0:
+		fmt.Fprintln(os.Stderr, "no remote host")
+		return
+	case 1:
+		w = ws[0]
+	default:
+		w = io.MultiWriter(ws...)
+	}
+	_, err = io.Copy(w, c)
 	if err != nil {
 		log.Fatalln(err)
 	}
