@@ -30,6 +30,7 @@ func main() {
 	flag.StringVar(&settings.Proto, "p", "udp", "protocol")
 	flag.Parse()
 
+	var z int
 	if settings.Config {
 		r, err := os.Open(flag.Arg(0))
 		if err != nil {
@@ -47,10 +48,11 @@ func main() {
 		}
 		settings.Local = flag.Arg(0)
 		settings.Remotes = flag.Args()
+		z = 1
 	}
 
 	var ws []io.Writer
-	for i := 1; i < len(settings.Remotes); i++ {
+	for i := z; i < len(settings.Remotes); i++ {
 		scheme, addr := settings.Proto, settings.Remotes[i]
 		if u, err := url.Parse(addr); err == nil {
 			scheme, addr = u.Scheme, u.Host
