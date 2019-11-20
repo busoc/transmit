@@ -174,7 +174,7 @@ func dumpPackets(c net.Conn, f string) {
 
 func runSimulate(cmd *cli.Command, args []string) error {
 	var (
-		size cli.MultiSize
+		size cli.Size
 		rate cli.Size
 	)
 	cmd.Flag.Var(&size, "s", "write packets of size byts to group")
