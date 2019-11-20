@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"text/template"
 
 	"github.com/busoc/transmit"
 	"github.com/midbel/cli"

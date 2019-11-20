@@ -179,12 +179,11 @@ func runSimulate(cmd *cli.Command, args []string) error {
 	)
 	cmd.Flag.Var(&size, "s", "write packets of size byts to group")
 	cmd.Flag.Var(&rate, "t", "rate limiting")
-	cmd.Flag.BoolVar(&size.Alea, "r", false, "write packets of random size with upper limit set to to size")
+	// cmd.Flag.BoolVar(&size.Alea, "r", false, "write packets of random size with upper limit set to to size")
 	datadir := cmd.Flag.String("d", "", "datadir")
 	every := cmd.Flag.Duration("e", time.Second, "write a packet every given elapsed interval")
 	count := cmd.Flag.Int("c", 0, "write count packets to group then exit")
 	quiet := cmd.Flag.Bool("q", false, "suppress write debug information on stderr")
-	zero := cmd.Flag.Bool("z", false, "fill packets only with zero")
 	proto := cmd.Flag.String("p", "tcp", "protocol")
 	syst := cmd.Flag.Bool("y", false, "system clock")
 
@@ -237,8 +236,6 @@ func runSimulate(cmd *cli.Command, args []string) error {
 					return
 				}
 				reader = io.MultiReader(rs...)
-			case *zero:
-				reader = rw.Zero(int(size.Sum()))
 			default:
 				reader = rw.Rand()
 			}
