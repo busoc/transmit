@@ -1,9 +1,9 @@
 package main
 
 import (
-  "fmt"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 
@@ -180,9 +180,9 @@ func (m *mux) Listen(conn int64) error {
 
 		go func(c net.Conn) {
 			defer c.Close()
-      if c, ok := c.(*net.TCPConn); ok {
-        c.SetKeepAlive(true)
-      }
+			if c, ok := c.(*net.TCPConn); ok {
+				c.SetKeepAlive(true)
+			}
 			m.Recv(c, sema)
 		}(c)
 	}
@@ -194,11 +194,11 @@ func (m *mux) Recv(rs io.Reader, sema *semaphore.Weighted) error {
 
 	var (
 		buf = make([]byte, DefaultBuffer)
-    sum = xxh.New64(0)
+		sum = xxh.New64(0)
 
-		size uint16
-		port uint16
-    digest uint64
+		size   uint16
+		port   uint16
+		digest uint64
 	)
 	for {
 		binary.Read(rs, binary.BigEndian, &size)
@@ -209,13 +209,12 @@ func (m *mux) Recv(rs io.Reader, sema *semaphore.Weighted) error {
 		}
 		binary.Read(rs, binary.BigEndian, &digest)
 		if s := sum.Sum64(); digest != s {
-      fmt.Println(digest, s)
 			continue
 		}
 		if err := m.Write(port, buf[:int(size)]); err != nil {
 			return err
 		}
-    sum.Reset()
+		sum.Reset()
 	}
 	return nil
 }
