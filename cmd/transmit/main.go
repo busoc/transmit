@@ -1,173 +1,237 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"io/ioutil"
-	"log"
-	"os"
-	"path/filepath"
+  "fmt"
+	"context"
+	"encoding/binary"
+	"io"
+	"net"
 
-	"github.com/busoc/transmit"
 	"github.com/midbel/cli"
+	"github.com/midbel/toml"
+	"github.com/midbel/xxh"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
-const helpText = `{{.Name}} contains various actions to monitor system activities.
+const (
+	DefaultClient = 256
+	DefaultBuffer = 32 << 10
+)
 
-Usage:
-
-  {{.Name}} command [arguments]
-
-The commands are:
-
-{{range .Commands}}{{printf "  %-9s %s" .String .Short}}
-{{end}}
-
-Use {{.Name}} [command] -h for more information about its usage.
-`
+type Route struct {
+	Port uint16
+	Addr string `toml:"ip"`
+}
 
 var commands = []*cli.Command{
 	{
-		Run:   runDumper,
-		Usage: "dump <host:port>",
-		Short: "dump packets received like hexdump -C -v",
-	},
-	{
-		Run:   runSimulate,
-		Usage: "simulate [-q] [-r] [-e] [-c] [-s] [-p] [-z] [-t] <host:port...>",
-		Short: "generate random packets and send them to the specify addresses",
-		Alias: []string{"generate", "sim", "gen"},
-		Desc: `
-
-options:
-	-p proto  use the specify protocol (tcp or udp)
-	-c count  write count packets to group then exit
-	-e every  write a packet every given elapsed interval to group
-	-s size   write packet of size bytes to group
-	-t rate   limit outgoing bandwidth
-	-z        write packet with only zeros
-	-r        write packet of random size to group with upper limit set to size
-	-q        suppress debug information from stderr
-`,
-	},
-	{
+		Usage: "relay <config>",
 		Run:   runRelay,
-		Usage: "relay <relay.toml>",
-		Short: "",
-		Alias: []string{"send"},
-		Desc:  ``,
 	},
 	{
-		Run:   runGateway,
-		Usage: "gateway <config.toml>",
-		Short: "",
-		Alias: []string{"recv", "listen", "gw"},
-		Desc:  ``,
+		Usage: "gateway <config>",
+		Run:   runGate,
 	},
-	{
-		Run:   runSplit2,
-		Usage: "split2 <config.toml>",
-		Short: "split and send fragmented packets",
-	},
-	{
-		Run:   runMerge2,
-		Usage: "merge2 <config.toml>",
-		Short: "merge and send fragmented packets",
-	},
-	{
-		Run:   runSplit,
-		Usage: "split [-b] [-n] [-k] [-r] [-s] [-y] <remote> <local,...>",
-		Alias: []string{"disassemble"},
-		Short: "split and send fragmented packets",
-		Desc: `
-options:
-  -b block  split incoming packets by chunks of block bytes (default: 1K)
-  -n count  use count outgoing connection(s) (default: 4)
-  -k keep   use same rate for all outgoing connections(s) (default: false)
-  -r rate   specify bandwidth by requested connections (default: 8m)
-  -s size   buffer to read from incoming connections (default: 32K)
-
-notes on UNIT:
-b, k, kb, m, mb, g, gb   bits, kilobits, megabits and gigabits (the b is not required for k, m and g)
-B, K, KB, M, MB, G, GB   bytes, kilobytes, megabytes and gigabytes (the B is not required for K, M and G)
-
-The default unit assumed when no unit is given is the bytes.
-`,
-	},
-	{
-		Run:   runMerge,
-		Usage: "merge <local> <remote,...>",
-		Alias: []string{"reassemble"},
-		Short: "merge and send fragmented packets",
-		Desc:  ``,
-	},
-}
-
-func init() {
-	transmit.Logger.SetOutput(os.Stderr)
 }
 
 func main() {
-	cli.RunAndExit(commands, cli.Usage("transmit", helpText, commands))
+	cli.RunAndExit(commands, nil)
 }
 
-type cert struct {
-	Policy   string `toml:"policy"`
-	Name     string `toml:"server"`
-	Root     string `toml:"root"`
-	CertFile string `toml:"cert"`
-	KeyFile  string `toml:"key"`
-	Insecure bool   `toml:"insecure"`
+func runRelay(cmd *cli.Command, args []string) error {
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
 
-	config *tls.Config
+	c := struct {
+		Remote string
+		Routes []Route `toml:"route"`
+	}{}
+	if err := toml.DecodeFile(cmd.Flag.Arg(0), &c); err != nil {
+		return err
+	}
+	var group errgroup.Group
+	for _, r := range c.Routes {
+		fn, err := relay(r.Addr, c.Remote, r.Port)
+		if err != nil {
+			return err
+		}
+		group.Go(fn)
+	}
+	return group.Wait()
 }
 
-func (c cert) Server() *tls.Config {
-	cert := c.Client()
-	if cert == nil {
-		return cert
+func runGate(cmd *cli.Command, args []string) error {
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
 	}
-	cert.ClientCAs = cert.RootCAs
-	switch c.Policy {
-	case "request":
-		cert.ClientAuth = tls.RequestClientCert
-	case "require":
-		cert.ClientAuth = tls.RequireAnyClientCert
-	case "verify":
-		cert.ClientAuth = tls.VerifyClientCertIfGiven
-	case "none":
-		cert.ClientAuth = tls.NoClientCert
-	default:
-		cert.ClientAuth = tls.RequireAndVerifyClientCert
+	c := struct {
+		Local   string
+		Clients uint16
+		Routes  []Route `toml:"route"`
+	}{}
+	if err := toml.DecodeFile(cmd.Flag.Arg(0), &c); err != nil {
+		return err
 	}
-	return cert
-}
-
-func (c cert) Client() *tls.Config {
-	if c.config != nil {
-		return c.config
-	}
-	cert, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+	mx, err := Listen(c.Local, c.Routes)
 	if err != nil {
+		return err
+	}
+	return mx.Listen(int64(c.Clients))
+}
+
+func relay(local, remote string, port uint16) (func() error, error) {
+	w, err := net.Dial("tcp", remote)
+	if err != nil {
+		return nil, err
+	}
+	r, err := subscribe(local)
+	if err != nil {
+		return nil, err
+	}
+	return func() error {
+		defer func() {
+			w.Close()
+			r.Close()
+		}()
+
+		var (
+			sum = xxh.New64(0)
+			rs  = io.TeeReader(r, sum)
+			buf = make([]byte, DefaultBuffer)
+		)
+
+		for {
+			n, err := rs.Read(buf[4:])
+			if err != nil {
+				return err
+			}
+			binary.BigEndian.PutUint16(buf, uint16(n))
+			binary.BigEndian.PutUint16(buf[2:], port)
+			binary.BigEndian.PutUint64(buf[4+n:], sum.Sum64())
+
+			if _, err := w.Write(buf[:12+n]); err != nil {
+				return err
+			}
+
+			sum.Reset()
+		}
+		return nil
+	}, nil
+}
+
+func subscribe(addr string) (net.Conn, error) {
+	a, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	var c net.Conn
+	if a.IP.IsMulticast() {
+		c, err = net.ListenMulticastUDP("udp", nil, a)
+	} else {
+		c, err = net.ListenUDP("udp", a)
+	}
+	return c, err
+}
+
+type mux struct {
+	srv    net.Listener
+	routes map[uint16]net.Conn
+}
+
+func Listen(addr string, routes []Route) (*mux, error) {
+	s, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	rs := make(map[uint16]net.Conn)
+	for _, r := range routes {
+		c, err := net.Dial("udp", r.Addr)
+		if err != nil {
+			return nil, err
+		}
+		rs[r.Port] = c
+	}
+	return &mux{
+		srv:    s,
+		routes: rs,
+	}, nil
+}
+
+func (m *mux) Listen(conn int64) error {
+	defer m.Close()
+	if conn == 0 {
+		conn = DefaultClient
+	}
+
+	var (
+		ctx  = context.TODO()
+		sema = semaphore.NewWeighted(int64(conn))
+	)
+	for {
+		if err := sema.Acquire(ctx, 1); err != nil {
+			return err
+		}
+		c, err := m.srv.Accept()
+		if err != nil {
+			break
+		}
+
+		go func(c net.Conn) {
+			defer c.Close()
+      if c, ok := c.(*net.TCPConn); ok {
+        c.SetKeepAlive(true)
+      }
+			m.Recv(c, sema)
+		}(c)
+	}
+	return sema.Acquire(ctx, conn)
+}
+
+func (m *mux) Recv(rs io.Reader, sema *semaphore.Weighted) error {
+	defer sema.Release(1)
+
+	var (
+		buf = make([]byte, DefaultBuffer)
+    sum = xxh.New64(0)
+
+		size uint16
+		port uint16
+    digest uint64
+	)
+	for {
+		binary.Read(rs, binary.BigEndian, &size)
+		binary.Read(rs, binary.BigEndian, &port)
+
+		if _, err := io.ReadFull(io.TeeReader(rs, sum), buf[:int(size)]); err != nil {
+			return err
+		}
+		binary.Read(rs, binary.BigEndian, &digest)
+		if s := sum.Sum64(); digest != s {
+      fmt.Println(digest, s)
+			continue
+		}
+		if err := m.Write(port, buf[:int(size)]); err != nil {
+			return err
+		}
+    sum.Reset()
+	}
+	return nil
+}
+
+func (m *mux) Write(port uint16, buf []byte) error {
+	c, ok := m.routes[port]
+	if !ok {
 		return nil
 	}
-	c.config = &tls.Config{
-		ServerName:         c.Name,
-		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: c.Insecure,
+	_, err := c.Write(buf)
+	return err
+}
+
+func (m *mux) Close() error {
+	for _, c := range m.routes {
+		c.Close()
 	}
-	if is, err := ioutil.ReadDir(c.Root); err == nil {
-		p := x509.NewCertPool()
-		for _, i := range is {
-			bs, err := ioutil.ReadFile(filepath.Join(c.Root, i.Name()))
-			if err != nil {
-				continue
-			}
-			if ok := p.AppendCertsFromPEM(bs); !ok {
-				log.Printf("fail to add certificate to %s", i.Name())
-			}
-		}
-		c.config.RootCAs = p
-	}
-	return c.config
+	return nil
 }
