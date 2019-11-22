@@ -5,9 +5,10 @@ import (
 	"encoding/binary"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"net"
-	"time"
 	"sync"
+	"time"
 
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
@@ -35,6 +36,11 @@ var commands = []*cli.Command{
 		Usage: "gateway <config>",
 		Run:   runGate,
 	},
+	{
+		Usage: "feed [-z] [-p] [-c] [-s] <addr>",
+		Alias: []string{"sim", "play", "test"},
+		Run:   runFeed,
+	}
 }
 
 func main() {
@@ -81,6 +87,33 @@ func runGate(cmd *cli.Command, args []string) error {
 		return err
 	}
 	return mx.Listen(int64(c.Clients))
+}
+
+func runFeed(cmd *cli.Command, args []string) error {
+	var (
+		zero  = cmd.Flag.Bool("z", false, "zero")
+		size  = cmd.Flag.Int("s", 1024, "size")
+		count = cmd.Flag.Int("c", 0, "count")
+		sleep = cmd.Flag.Duration("p", 0, "sleep")
+	)
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	r := Dummy(*size, *zero)
+	w, err := net.Dial("udp", cmd.Flag.Arg(0))
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	for i := 0; *count <= 0 || i < *count; i++ {
+		if _, err := io.Copy(w, r); err != nil {
+			return err
+		}
+		if *sleep > 0 {
+			time.Sleep(*sleep)
+		}
+	}
+	return nil
 }
 
 func relay(local, remote string, port uint16) (func() error, error) {
@@ -140,7 +173,7 @@ func subscribe(addr string) (net.Conn, error) {
 type Conn struct {
 	net.Conn
 
-	mu sync.Mutex
+	mu     sync.Mutex
 	writer io.Writer
 }
 
@@ -150,7 +183,7 @@ func Dial(addr string) (net.Conn, error) {
 		return nil, err
 	}
 	c := Conn{
-		Conn: x,
+		Conn:   x,
 		writer: x,
 	}
 	return &c, nil
@@ -286,4 +319,29 @@ func (m *mux) Close() error {
 		c.Close()
 	}
 	return nil
+}
+
+func Dummy(z int, zero bool) io.Reader {
+	xs := make([]byte, z)
+	if !zero {
+		for i := 0; i < z; i += 4 {
+			binary.BigEndian.PutUint32(xs[i:], rand.Uint32())
+		}
+	}
+	return empty{alea: !zero, buffer: xs}
+}
+
+type empty struct {
+	alea   bool
+	buffer []byte
+}
+
+func (e empty) Read(xs []byte) (int, error) {
+	if e.alea {
+		rand.Shuffle(len(e.buffer), func(i, j int) {
+			e.buffer[i], e.buffer[j] = e.buffer[j], e.buffer[i]
+		})
+	}
+	n := copy(xs, e.buffer)
+	return n, nil
 }
