@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
+	"time"
+	"sync"
 
 	"github.com/midbel/cli"
 	"github.com/midbel/toml"
@@ -36,7 +38,7 @@ var commands = []*cli.Command{
 }
 
 func main() {
-	cli.RunAndExit(commands, nil)
+	cli.RunAndExit(commands, cli.Usage("transmit", "", commands))
 }
 
 func runRelay(cmd *cli.Command, args []string) error {
@@ -82,7 +84,7 @@ func runGate(cmd *cli.Command, args []string) error {
 }
 
 func relay(local, remote string, port uint16) (func() error, error) {
-	w, err := net.Dial("tcp", remote)
+	w, err := Dial(remote)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +135,57 @@ func subscribe(addr string) (net.Conn, error) {
 		c, err = net.ListenUDP("udp", a)
 	}
 	return c, err
+}
+
+type Conn struct {
+	net.Conn
+
+	mu sync.Mutex
+	writer io.Writer
+}
+
+func Dial(addr string) (net.Conn, error) {
+	x, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	c := Conn{
+		Conn: x,
+		writer: x,
+	}
+	return &c, nil
+}
+
+func (c *Conn) Write(bs []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	_, err := c.writer.Write(bs)
+	if err != nil {
+		switch c.Conn.(type) {
+		case *net.UDPConn:
+		case *net.TCPConn:
+			c.writer = ioutil.Discard
+
+			go c.reconnect()
+		}
+	}
+	return len(bs), nil
+}
+
+func (c *Conn) reconnect() {
+	addr := c.RemoteAddr().String()
+	defer c.Conn.Close()
+	for {
+		x, err := net.DialTimeout("tcp", addr, time.Second*5)
+		if err == nil {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+
+			c.writer, c.Conn = x, x
+			break
+		}
+	}
 }
 
 type mux struct {
