@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +48,17 @@ var commands = []*cli.Command{
 		Short: "create and send dummy packets to a UDP service",
 		// Desc:  ``,
 		Run: runFeed,
+	},
+	{
+		Usage: "log <addr...>",
+		Alias: []string{"dump"},
+		Short: "print basic information on received packets",
+		Run:   runLog,
+	},
+	{
+		Usage: "store [-d] <addr...>",
+		Short: "store each packets in files",
+		Run:   runStore,
 	},
 }
 
@@ -430,6 +443,47 @@ func (m *mux) Close() error {
 	return nil
 }
 
+func runLog(cmd *cli.Command, args []string) error {
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	var grp errgroup.Group
+	for _, a := range cmd.Flag.Args() {
+		c, err := subscribe(a)
+		if err != nil {
+			return err
+		}
+		grp.Go(func() error {
+			defer c.Close()
+
+			var (
+				digest = xxh.New64(0)
+				buf = make([]byte, 1<<16)
+				rs = io.TeeReader(c, digest)
+			)
+			for {
+				n, err := rs.Read(buf)
+				if err != nil {
+					break
+				}
+
+				log.Printf("%s: %5d bytes %x... (%x)", c.LocalAddr(), n, buf[:16], digest.Sum(nil))
+				digest.Reset()
+			}
+			return nil
+		})
+	}
+	return grp.Wait()
+}
+
+func runStore(cmd *cli.Command, args []string) error {
+	datadir := cmd.Flag.String("d", os.TempDir(), "data directory")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	return os.MkdirAll(*datadir, 0755)
+}
+
 func runFeed(cmd *cli.Command, args []string) error {
 	var (
 		zero  = cmd.Flag.Bool("z", false, "zero")
@@ -446,8 +500,13 @@ func runFeed(cmd *cli.Command, args []string) error {
 		return err
 	}
 	defer w.Close()
+
+	buf := make([]byte, *size)
 	for i := 0; *count <= 0 || i < *count; i++ {
-		if _, err := io.Copy(w, r); err != nil {
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return err
+		}
+		if _, err := w.Write(buf); err != nil {
 			return err
 		}
 		if *sleep > 0 {
@@ -458,6 +517,9 @@ func runFeed(cmd *cli.Command, args []string) error {
 }
 
 func Dummy(z int, zero bool) io.Reader {
+	if mod := z%4; !zero && mod != 0 {
+		z+=mod
+	}
 	xs := make([]byte, z)
 	if !zero {
 		for i := 0; i < z; i += 4 {
