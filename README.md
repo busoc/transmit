@@ -1,10 +1,31 @@
 # transmit
 
-enhance packets transmission from one network to another.
-
 ## transmit protocol
 
+To forward packets from one network to another, transmit uses a simple protocol
+by adding its own headers on each received packets.
+
+| header | size (bytes) | description                             |
+| ------ | ------------ | --------------------------------------- |
+| size   | 2            | size of the original packet in bytes    |
+| id     | 2            | identifier of the remote route          |
+| digest | 8            | checksum (xxh64) of the original packet |
+
+The goal of the protocol is to ensure two things:
+
+1. all packets are correctly re-routed to the correct network after having been
+   forwarded
+2. no corruption occurred between the source network and the destination network
+
 ## transmit relay
+
+The relay sub command is used to forward packets from one or multiple multicast
+groups to another network that does not have any connectivity with its source (
+eg, firewall between the two networks only accepting a limited set of TCP
+connections).
+
+The task of this command is to connect to the remote network and "prepare" all
+incoming packets so that they can be re-routed properly in the remote network.
 
 ### table [default]
 
@@ -12,15 +33,17 @@ enhance packets transmission from one network to another.
 
 ### table [certificate]
 
-* pem-file: path to a pem encoded certificate
-* key-file: path to a pem encoded certificate key
+* pem-file: path to a PEM encoded certificate
+* key-file: path to a PEM encoded certificate key
 * cert-auth: list of certificates to be used to verify server certificate
-* insecure: verify the server certificate chain and its hostname
+* insecure: verify the server certificate chain and its host name
 
 ### table [[route]]
 
-* id:
-* ip:
+* id: a number used to identify the remote route where transmit will forward the
+  incoming stream. If not set or set to 0, the port number of the source address
+  will be used.
+* ip: address (host:port) where to listen for incoming packets
 
 ### configuration example
 
@@ -44,22 +67,29 @@ ip = "239.192.0.1:44444"
 
 ## transmit gateway
 
+The gateway sub command does the opposite of the relay sub command. It unwrap the
+original packet, checks its header and try to find the route where the packet should
+be sent regarding the "id" field of the header. If no route is found, the packets
+with the given id are automatically discarded by transmit.
+
 ### table [default]
 
 * local: local address to be used for accepting connection from clients
-* clients: maximum number of simulatenous client connections accepted
+* clients: maximum number of simultaneous client connections accepted
 
 ### table [certificate]
 
-* pem-file: path to a pem encoded certificate
-* key-file: path to a pem encoded certificate key
+* pem-file: path to a PEM encoded certificate
+* key-file: path to a PEM encoded certificate key
 * cert-auth: list of certificates to be used to verify client certificates
 * policy: policy for TLS client authentication
 
 ### table [[route]]
 
-* port:
-* ip:
+* id: a number used to identify the route where to forward the incoming packets
+  stream. If not set or set to 0, the port number of the destination address will
+  be used
+* ip: address (host:port) where to transmit will forward incoming packets
 
 ### example: configuration
 
