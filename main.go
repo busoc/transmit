@@ -5,10 +5,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,11 +26,6 @@ const (
 	DefaultClient = 256
 	DefaultBuffer = 32 << 10
 )
-
-type Route struct {
-	Port uint16
-	Addr string `toml:"ip"`
-}
 
 var commands = []*cli.Command{
 	{
@@ -64,6 +62,11 @@ The commands are:
 
 Use {{.Name}} [command] -h for more information about its usage.
 `
+
+type Route struct {
+	Port uint16 `toml:"id"`
+	Addr string `toml:"ip"`
+}
 
 type Certificate struct {
 	Pem      string   `toml:"cert-file"`
@@ -137,19 +140,17 @@ func (c Certificate) buildCertPool() (*x509.CertPool, error) {
 	if len(c.CertAuth) == 0 {
 		return x509.SystemCertPool()
 	}
-	c := x509.NewCertPool()
+	pool := x509.NewCertPool()
 	for _, f := range c.CertAuth {
 		pem, err := ioutil.ReadFile(f)
 		if err != nil {
 			return nil, err
 		}
-		cert, err := x509.ParseCertificate(pem)
-		if err != nil {
-			return nil, err
+		if ok := pool.AppendCertsFromPEM(pem); !ok {
+			return nil, fmt.Errorf("fail to append certificate %s", f)
 		}
-		c.AddCert(cert)
 	}
-	return c, nil
+	return pool, nil
 }
 
 func main() {
@@ -171,6 +172,14 @@ func runRelay(cmd *cli.Command, args []string) error {
 	}
 	var group errgroup.Group
 	for _, r := range c.Routes {
+		_, port, err := net.SplitHostPort(r.Addr)
+		if err == nil && r.Port == 0 {
+			p, err := strconv.ParseUint(port, 10, 16)
+			if err != nil {
+				return err
+			}
+			r.Port = uint16(p)
+		}
 		fn, err := relay(c.Remote, r.Addr, r.Port, c.Cert)
 		if err != nil {
 			return err
@@ -181,7 +190,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 }
 
 func relay(remote, local string, port uint16, cert Certificate) (func() error, error) {
-	w, err := Dial(remote)
+	w, err := Dial(remote, cert)
 	if err != nil {
 		return nil, err
 	}
@@ -220,76 +229,20 @@ func relay(remote, local string, port uint16, cert Certificate) (func() error, e
 	}, nil
 }
 
-func runGate(cmd *cli.Command, args []string) error {
-	if err := cmd.Flag.Parse(args); err != nil {
-		return err
-	}
-	c := struct {
-		Local   string
-		Clients uint16
-		Cert    Certificate
-		Routes  []Route `toml:"route"`
-	}{}
-	if err := toml.DecodeFile(cmd.Flag.Arg(0), &c); err != nil {
-		return err
-	}
-	mx, err := Listen(c.Local, c.Routes)
-	if err != nil {
-		return err
-	}
-	return mx.Listen(int64(c.Clients))
-}
-
-func runFeed(cmd *cli.Command, args []string) error {
-	var (
-		zero  = cmd.Flag.Bool("z", false, "zero")
-		size  = cmd.Flag.Int("s", 1024, "size")
-		count = cmd.Flag.Int("c", 0, "count")
-		sleep = cmd.Flag.Duration("p", 0, "sleep")
-	)
-	if err := cmd.Flag.Parse(args); err != nil {
-		return err
-	}
-	r := Dummy(*size, *zero)
-	w, err := net.Dial("udp", cmd.Flag.Arg(0))
-	if err != nil {
-		return err
-	}
-	defer w.Close()
-	for i := 0; *count <= 0 || i < *count; i++ {
-		if _, err := io.Copy(w, r); err != nil {
-			return err
-		}
-		if *sleep > 0 {
-			time.Sleep(*sleep)
-		}
-	}
-	return nil
-}
-
-func subscribe(addr string) (net.Conn, error) {
-	a, err := net.ResolveUDPAddr("udp", addr)
-	if err != nil {
-		return nil, err
-	}
-	var c net.Conn
-	if a.IP.IsMulticast() {
-		c, err = net.ListenMulticastUDP("udp", nil, a)
-	} else {
-		c, err = net.ListenUDP("udp", a)
-	}
-	return c, err
-}
-
 type Conn struct {
 	net.Conn
+	cert Certificate
 
 	mu     sync.Mutex
 	writer io.Writer
 }
 
-func Dial(addr string) (net.Conn, error) {
+func Dial(addr string, cert Certificate) (net.Conn, error) {
 	x, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	x, err = cert.Client(x)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +261,7 @@ func (c *Conn) Write(bs []byte) (int, error) {
 	if err != nil {
 		switch c.Conn.(type) {
 		case *net.UDPConn:
-		case *net.TCPConn:
+		case *net.TCPConn, *tls.Conn:
 			c.writer = ioutil.Discard
 
 			go c.reconnect()
@@ -318,13 +271,15 @@ func (c *Conn) Write(bs []byte) (int, error) {
 }
 
 func (c *Conn) reconnect() {
+	c.Conn.Close()
+
 	addr := c.RemoteAddr().String()
-	defer c.Conn.Close()
 	for {
 		x, err := net.DialTimeout("tcp", addr, time.Second*5)
 		if err == nil {
 			c.mu.Lock()
 			defer c.mu.Unlock()
+			x, _ = c.cert.Client(x)
 
 			c.writer, c.Conn = x, x
 			break
@@ -332,18 +287,64 @@ func (c *Conn) reconnect() {
 	}
 }
 
+func subscribe(addr string) (net.Conn, error) {
+	a, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	var c net.Conn
+	if a.IP.IsMulticast() {
+		c, err = net.ListenMulticastUDP("udp", nil, a)
+	} else {
+		c, err = net.ListenUDP("udp", a)
+	}
+	return c, err
+}
+
+func runGate(cmd *cli.Command, args []string) error {
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	c := struct {
+		Local   string
+		Clients uint16
+		Cert    Certificate
+		Routes  []Route `toml:"route"`
+	}{}
+	if err := toml.DecodeFile(cmd.Flag.Arg(0), &c); err != nil {
+		return err
+	}
+	mx, err := Listen(c.Local, c.Cert, c.Routes)
+	if err != nil {
+		return err
+	}
+	return mx.Listen(int64(c.Clients))
+}
+
 type mux struct {
 	srv    net.Listener
 	routes map[uint16]net.Conn
 }
 
-func Listen(addr string, routes []Route) (*mux, error) {
+func Listen(addr string, cert Certificate, routes []Route) (*mux, error) {
 	s, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	s, err = cert.Listen(s)
 	if err != nil {
 		return nil, err
 	}
 	rs := make(map[uint16]net.Conn)
 	for _, r := range routes {
+		_, port, err := net.SplitHostPort(r.Addr)
+		if err == nil && r.Port == 0 {
+			p, err := strconv.ParseUint(port, 10, 16)
+			if err != nil {
+				return nil, err
+			}
+			r.Port = uint16(p)
+		}
 		c, err := net.Dial("udp", r.Addr)
 		if err != nil {
 			return nil, err
@@ -377,9 +378,6 @@ func (m *mux) Listen(conn int64) error {
 
 		go func(c net.Conn) {
 			defer c.Close()
-			if c, ok := c.(*net.TCPConn); ok {
-				c.SetKeepAlive(true)
-			}
 			m.Recv(c, sema)
 		}(c)
 	}
@@ -428,6 +426,33 @@ func (m *mux) Write(port uint16, buf []byte) error {
 func (m *mux) Close() error {
 	for _, c := range m.routes {
 		c.Close()
+	}
+	return nil
+}
+
+func runFeed(cmd *cli.Command, args []string) error {
+	var (
+		zero  = cmd.Flag.Bool("z", false, "zero")
+		size  = cmd.Flag.Int("s", 1024, "size")
+		count = cmd.Flag.Int("c", 0, "count")
+		sleep = cmd.Flag.Duration("p", 0, "sleep")
+	)
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	r := Dummy(*size, *zero)
+	w, err := net.Dial("udp", cmd.Flag.Arg(0))
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	for i := 0; *count <= 0 || i < *count; i++ {
+		if _, err := io.Copy(w, r); err != nil {
+			return err
+		}
+		if *sleep > 0 {
+			time.Sleep(*sleep)
+		}
 	}
 	return nil
 }
