@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"io"
 	"io/ioutil"
@@ -30,21 +32,128 @@ type Route struct {
 var commands = []*cli.Command{
 	{
 		Usage: "relay <config>",
-		Run:   runRelay,
+		Short: "forwards packets from multicast groups to a remote network via TCP",
+		// Desc:  ``,
+		Run: runRelay,
 	},
 	{
 		Usage: "gateway <config>",
-		Run:   runGate,
+		Short: "forwards packets incoming packets to a set of multicast groups",
+		// Desc:  ``,
+		Run: runGate,
 	},
 	{
 		Usage: "feed [-z] [-p] [-c] [-s] <addr>",
 		Alias: []string{"sim", "play", "test"},
-		Run:   runFeed,
+		Short: "create and send dummy packets to a UDP service",
+		// Desc:  ``,
+		Run: runFeed,
+	},
+}
+
+const help = `{{.Name}} allows to send packets from multicast groups to another network via TCP.
+
+Usage:
+
+  {{.Name}} command [arguments]
+
+The commands are:
+
+{{range .Commands}}{{printf "  %-9s %s" .String .Short}}
+{{end}}
+
+Use {{.Name}} [command] -h for more information about its usage.
+`
+
+type Certificate struct {
+	Pem      string   `toml:"cert-file"`
+	Key      string   `toml:"key-file"`
+	CertAuth []string `toml:"cert-auth"`
+	Policy   string   `toml:"policy"`
+	Insecure bool     `toml:"insecure"`
+}
+
+func (c Certificate) Client(inner net.Conn) (net.Conn, error) {
+	if c.Pem == "" && c.Key == "" {
+		return inner, nil
 	}
+	pool, err := c.buildCertPool()
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := tls.LoadX509KeyPair(c.Pem, c.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            pool,
+		InsecureSkipVerify: c.Insecure,
+	}
+	return tls.Client(inner, &cfg), nil
+}
+
+func (c Certificate) Listen(inner net.Listener) (net.Listener, error) {
+	if c.Pem == "" && c.Key == "" {
+		return inner, nil
+	}
+
+	pool, err := c.buildCertPool()
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := tls.LoadX509KeyPair(c.Pem, c.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientCAs:    pool,
+	}
+
+	switch strings.ToLower(c.Policy) {
+	case "request":
+		cfg.ClientAuth = tls.RequestClientCert
+	case "require", "any":
+		cfg.ClientAuth = tls.RequireAnyClientCert
+	case "verify":
+		cfg.ClientAuth = tls.VerifyClientCertIfGiven
+	case "none":
+		cfg.ClientAuth = tls.NoClientCert
+	case "", "require+verify":
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	default:
+		return nil, fmt.Errorf("%s: unknown policy", c.Policy)
+	}
+
+	return tls.NewListener(inner, &cfg), nil
+}
+
+func (c Certificate) buildCertPool() (*x509.CertPool, error) {
+	if len(c.CertAuth) == 0 {
+		return x509.SystemCertPool()
+	}
+	c := x509.NewCertPool()
+	for _, f := range c.CertAuth {
+		pem, err := ioutil.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := x509.ParseCertificate(pem)
+		if err != nil {
+			return nil, err
+		}
+		c.AddCert(cert)
+	}
+	return c, nil
 }
 
 func main() {
-	cli.RunAndExit(commands, cli.Usage("transmit", "", commands))
+	cli.RunAndExit(commands, cli.Usage("transmit", help, commands))
 }
 
 func runRelay(cmd *cli.Command, args []string) error {
@@ -54,14 +163,15 @@ func runRelay(cmd *cli.Command, args []string) error {
 
 	c := struct {
 		Remote string
-		Routes []Route `toml:"route"`
+		Cert   Certificate `toml:"certificate"`
+		Routes []Route     `toml:"route"`
 	}{}
 	if err := toml.DecodeFile(cmd.Flag.Arg(0), &c); err != nil {
 		return err
 	}
 	var group errgroup.Group
 	for _, r := range c.Routes {
-		fn, err := relay(r.Addr, c.Remote, r.Port)
+		fn, err := relay(c.Remote, r.Addr, r.Port, c.Cert)
 		if err != nil {
 			return err
 		}
@@ -70,53 +180,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 	return group.Wait()
 }
 
-func runGate(cmd *cli.Command, args []string) error {
-	if err := cmd.Flag.Parse(args); err != nil {
-		return err
-	}
-	c := struct {
-		Local   string
-		Clients uint16
-		Routes  []Route `toml:"route"`
-	}{}
-	if err := toml.DecodeFile(cmd.Flag.Arg(0), &c); err != nil {
-		return err
-	}
-	mx, err := Listen(c.Local, c.Routes)
-	if err != nil {
-		return err
-	}
-	return mx.Listen(int64(c.Clients))
-}
-
-func runFeed(cmd *cli.Command, args []string) error {
-	var (
-		zero  = cmd.Flag.Bool("z", false, "zero")
-		size  = cmd.Flag.Int("s", 1024, "size")
-		count = cmd.Flag.Int("c", 0, "count")
-		sleep = cmd.Flag.Duration("p", 0, "sleep")
-	)
-	if err := cmd.Flag.Parse(args); err != nil {
-		return err
-	}
-	r := Dummy(*size, *zero)
-	w, err := net.Dial("udp", cmd.Flag.Arg(0))
-	if err != nil {
-		return err
-	}
-	defer w.Close()
-	for i := 0; *count <= 0 || i < *count; i++ {
-		if _, err := io.Copy(w, r); err != nil {
-			return err
-		}
-		if *sleep > 0 {
-			time.Sleep(*sleep)
-		}
-	}
-	return nil
-}
-
-func relay(local, remote string, port uint16) (func() error, error) {
+func relay(remote, local string, port uint16, cert Certificate) (func() error, error) {
 	w, err := Dial(remote)
 	if err != nil {
 		return nil, err
@@ -154,6 +218,53 @@ func relay(local, remote string, port uint16) (func() error, error) {
 		}
 		return nil
 	}, nil
+}
+
+func runGate(cmd *cli.Command, args []string) error {
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	c := struct {
+		Local   string
+		Clients uint16
+		Cert    Certificate
+		Routes  []Route `toml:"route"`
+	}{}
+	if err := toml.DecodeFile(cmd.Flag.Arg(0), &c); err != nil {
+		return err
+	}
+	mx, err := Listen(c.Local, c.Routes)
+	if err != nil {
+		return err
+	}
+	return mx.Listen(int64(c.Clients))
+}
+
+func runFeed(cmd *cli.Command, args []string) error {
+	var (
+		zero  = cmd.Flag.Bool("z", false, "zero")
+		size  = cmd.Flag.Int("s", 1024, "size")
+		count = cmd.Flag.Int("c", 0, "count")
+		sleep = cmd.Flag.Duration("p", 0, "sleep")
+	)
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	r := Dummy(*size, *zero)
+	w, err := net.Dial("udp", cmd.Flag.Arg(0))
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	for i := 0; *count <= 0 || i < *count; i++ {
+		if _, err := io.Copy(w, r); err != nil {
+			return err
+		}
+		if *sleep > 0 {
+			time.Sleep(*sleep)
+		}
+	}
+	return nil
 }
 
 func subscribe(addr string) (net.Conn, error) {

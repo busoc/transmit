@@ -1,9 +1,0 @@
-address = ":35987"
-
-[[channel]]
-port    = [41001, 43003]
-address = "localhost:10015"
-
-[[channel]]
-port    = [41002]
-address = "localhost:10016"
