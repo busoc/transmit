@@ -113,3 +113,19 @@ ip = "239.192.0.1:33333"
 ```
 
 ## transmit feed (alias: sim, play, test)
+
+The feed sub command is mainly used to send dummy packets (filled of zeros or with
+random data) to a transmit relay instance. But it can also be used to send dummy
+packets to another process such as [duplicate](https://github.com/busoc/duplicate)
+for test purposes.
+
+```bash
+$ transmit feed [options...] <address>
+
+where options are:
+
+  -z        create packets filled of zero. If not set, the default, packets will contain random data
+  -s SIZE   create packets of SIZE bytes
+  -c COUNT  send COUNT packets and then quit. if COUNT is zero, then feed will continue forever
+  -p SLEEP  wait SLEEP time between two packets
+```
