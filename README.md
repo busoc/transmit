@@ -1,4 +1,45 @@
 # transmit
-[![Go Report Card Badge](https://goreportcard.com/badge/github.com/midbel/transmit)](https://goreportcard.com/report/github.com/midbel/transmit)
 
 enhance packets transmission from one network to another.
+
+## transmit protocol
+
+## transmit relay
+
+### table [default]
+
+* remote
+
+### table [certificate]
+
+* pem-file:
+* key-file:
+* cert-auth:
+* insecure:
+
+### table [[route]]
+
+* port:
+* ip:
+
+## transmit gateway
+
+### table [default]
+
+* local
+* clients
+
+### table [certificate]
+
+* pem-file:
+* key-file:
+* cert-auth:
+* policy:
+
+### table [[route]]
+
+* port:
+* ip:
+
+
+## transmit feed (alias: sim, play, test)
