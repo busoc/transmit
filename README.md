@@ -112,7 +112,7 @@ id = 41002
 ip = "239.192.0.1:33333"
 ```
 
-## transmit feed (alias: sim, play, test)
+## transmit feed
 
 The feed sub command is mainly used to send dummy packets (filled of zeros or with
 random data) to a transmit relay instance. But it can also be used to send dummy
@@ -120,7 +120,7 @@ packets to another process such as [duplicate](https://github.com/busoc/duplicat
 for test purposes.
 
 ```bash
-$ transmit feed [options...] <address>
+$ transmit (feed|sim|play|test) [options...] <host:port>
 
 where options are:
 
@@ -128,4 +128,44 @@ where options are:
   -s SIZE   create packets of SIZE bytes
   -c COUNT  send COUNT packets and then quit. if COUNT is zero, then feed will continue forever
   -p SLEEP  wait SLEEP time between two packets
+  -h        show the help message and exit
+```
+
+## transmit log
+
+The log sub command can be used to get basic information about the incoming packets.
+It prints on stderr the following information:
+
+* timestamp (YYYY/MM/DD hh:mm:ss)
+* size of each packets received (in bytes)
+* first 16 bytes of each packets
+* checksum of each packets (computed with xxHash)
+
+```bash
+$ transmit (log|dump) [options...] <host:port...>
+
+where options are:
+
+  -c COUNT  log information for the COUNT first packets
+  -h        show the help message and exit
+```
+
+
+## transmit store
+
+The store sub command can be used to write each incoming packets in a file. Each
+packet written will be preceded by two fields added by transmit:
+
+* size: unsigned integer 32bits big endian
+* unix timestamp: signed integer 64bits big endian
+
+```bash
+$ transmit store [options...] <host:port...>
+
+where options are:
+
+  -c COUNT    log information for the COUNT first packets
+  -p PREFIX   use PREFIX as prefix of each filename where packets will be written
+  -d DATADIR  save files in DATADIR creating it if necessary
+  -h          show the help message and exit
 ```
