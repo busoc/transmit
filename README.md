@@ -119,7 +119,7 @@ random data) to a transmit relay instance. But it can also be used to send dummy
 packets to another process such as [duplicate](https://github.com/busoc/duplicate)
 for test purposes.
 
-```bash
+```
 $ transmit (feed|sim|play|test) [options...] <host:port>
 
 where options are:
@@ -141,7 +141,7 @@ It prints on stderr the following information:
 * first 16 bytes of each packets
 * checksum of each packets (computed with xxHash)
 
-```bash
+```
 $ transmit (log|dump) [options...] <host:port...>
 
 where options are:
@@ -159,7 +159,7 @@ packet written will be preceded by two fields added by transmit:
 * size: unsigned integer 32bits big endian
 * unix timestamp: signed integer 64bits big endian
 
-```bash
+```
 $ transmit store [options...] <host:port...>
 
 where options are:
