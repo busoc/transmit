@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,14 +51,14 @@ var commands = []*cli.Command{
 		Run: runFeed,
 	},
 	{
-		Usage: "log <addr...>",
+		Usage: "log [-c] <addr...>",
 		Alias: []string{"dump"},
 		Short: "print basic information on received packets",
 		Run:   runLog,
 	},
 	{
-		Usage: "store [-d] <addr...>",
-		Short: "store each packets in files",
+		Usage: "store [-d] [-p] [-c] <addr...>",
+		Short: "save incoming packets in files",
 		Run:   runStore,
 	},
 }
