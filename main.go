@@ -444,6 +444,7 @@ func (m *mux) Close() error {
 }
 
 func runLog(cmd *cli.Command, args []string) error {
+	count := cmd.Flag.Int("c", 0, "capture packets")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -461,7 +462,7 @@ func runLog(cmd *cli.Command, args []string) error {
 				buf = make([]byte, 1<<16)
 				rs = io.TeeReader(c, digest)
 			)
-			for {
+			for i := 0; *count <= 0 || i < *count; i++ {
 				n, err := rs.Read(buf)
 				if err != nil {
 					break
@@ -477,11 +478,53 @@ func runLog(cmd *cli.Command, args []string) error {
 }
 
 func runStore(cmd *cli.Command, args []string) error {
-	datadir := cmd.Flag.String("d", os.TempDir(), "data directory")
+	var (
+		datadir = cmd.Flag.String("d", os.TempDir(), "data directory")
+		prefix  = cmd.Flag.String("p", "", "file prefix")
+		count   = cmd.Flag.Int("c", 0, "capture packets")
+	)
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	return os.MkdirAll(*datadir, 0755)
+	if err := os.MkdirAll(*datadir, 0755); err != nil {
+		return err
+	}
+	if *prefix == "" {
+		*prefix = "transmit"
+	}
+	var grp errgroup.Group
+	for i, a := range cmd.Flag.Args() {
+		c, err := subscribe(a)
+		if err != nil {
+			return err
+		}
+		i := i
+		grp.Go(func() error {
+			defer c.Close()
+
+			file := filepath.Join(*datadir, fmt.Sprintf("%s_%04d.dat", *prefix, i))
+			w, err := os.Create(file)
+			if err != nil {
+				return err
+			}
+			defer w.Close()
+
+			buf := make([]byte, 1<<16)
+			for i := 0; *count <= 0 || i < *count; i++ {
+				n, err := c.Read(buf)
+				if err != nil {
+					return err
+				}
+				binary.Write(w, binary.BigEndian, uint32(n))
+				binary.Write(w, binary.BigEndian, time.Now().UTC().Unix())
+				if _, err := w.Write(buf); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	return grp.Wait()
 }
 
 func runFeed(cmd *cli.Command, args []string) error {
